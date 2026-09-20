@@ -85,11 +85,11 @@ Vector solveScalers(Vector v1, Vector v2, Vector v3, Vector C){
 
    const double nx = v2.z*v3.y-v2.y*v3.z;
    const double ny = v2.z*v3.x+v2.x*v3.z;
-   const double nz = v2.y*v3.x-v2.x*v3.z;
+   const double nz = v2.y*v3.x-v2.x*v3.y;
 
    double vx = -C.z*v1.y+C.y*v1.z;
    double vy = C.z*v1.x-C.x*v1.z;
-   double vz = C.y*v1.x+C.x*v1.y;
+   double vz = C.y*v1.x-C.x*v1.y;
    
 
    //double denom = v1.z*v2.y*v3.x-v1.y*v2.z*v3.x-v1.z*v2.x*v3.y+v1.x*v2.z*v3.y+v1.y*v2.x*v3.z-v1.x*v2.y*v3.z;
