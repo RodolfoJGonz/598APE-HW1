@@ -82,11 +82,28 @@ Vector Vector::normalize(){
 
   
 Vector solveScalers(Vector v1, Vector v2, Vector v3, Vector C){
-   double denom = v1.z*v2.y*v3.x-v1.y*v2.z*v3.x-v1.z*v2.x*v3.y+v1.x*v2.z*v3.y+v1.y*v2.x*v3.z-v1.x*v2.y*v3.z;
-   double a = C.z*v2.y*v3.x-C.y*v2.z*v3.x-C.z*v2.x*v3.y+C.x*v2.z*v3.y+C.y*v2.x*v3.z-C.x*v2.y*v3.z;
-   double b = -C.z*v1.y*v3.x+C.y*v1.z*v3.x+C.z*v1.x*v3.y-C.x*v1.z*v3.y-C.y*v1.x*v3.z+C.x*v1.y*v3.z;
-   double c = C.z*v1.y*v2.x-C.y*v1.z*v2.x-C.z*v1.x*v2.y+C.x*v1.z*v2.y+C.y*v1.x*v2.z-C.x*v1.y*v2.z;
-   return Vector(a/denom, b/denom, c/denom);
+
+   const double nx = v2.z*v3.y-v2.y*v3.z;
+   const double ny = v2.z*v3.x+v2.x*v3.z;
+   const double nz = v2.y*v3.x-v2.x*v3.z;
+
+   double vx = -C.z*v1.y+C.y*v1.z;
+   double vy = C.z*v1.x-C.x*v1.z;
+   double vz = C.y*v1.x+C.x*v1.y;
+   
+
+   //double denom = v1.z*v2.y*v3.x-v1.y*v2.z*v3.x-v1.z*v2.x*v3.y+v1.x*v2.z*v3.y+v1.y*v2.x*v3.z-v1.x*v2.y*v3.z;
+   double denom = v1.x*nx-v1.y*ny+v1.z*nz;
+   //double a = C.z*v2.y*v3.x-C.y*v2.z*v3.x-C.z*v2.x*v3.y+C.x*v2.z*v3.y+C.y*v2.x*v3.z-C.x*v2.y*v3.z;
+   double a = C.x*nx-C.y*ny+C.z*nz;
+   //double b = -C.z*v1.y*v3.x+C.y*v1.z*v3.x+C.z*v1.x*v3.y-C.x*v1.z*v3.y-C.y*v1.x*v3.z+C.x*v1.y*v3.z;
+   double b = vx*v3.x+vy*v3.y-vz*v3.z;
+   //double c = C.z*v1.y*v2.x-C.y*v1.z*v2.x-C.z*v1.x*v2.y+C.x*v1.z*v2.y+C.y*v1.x*v2.z-C.x*v1.y*v2.z;
+   double c = (-vx)*v2.x-vy*v2.y+vz*v2.z;
+   
+   double invDenom = 1.0/denom;
+   //return Vector(a/denom, b/denom, c/denom);
+   return Vector(a*invDenom, b*invDenom, c*invDenom);
 }
 
 Ray::Ray(const Vector& po, const Vector& ve): point(po), vector(ve){}
