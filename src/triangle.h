@@ -8,6 +8,7 @@ public:
    Triangle(Vector c, Vector b, Vector a, Texture* t);
    double getIntersection(Ray ray);
    bool getLightIntersection(Ray ray, double* fill);
+   Vector va,vb,vc;
 };
 
 #endif
