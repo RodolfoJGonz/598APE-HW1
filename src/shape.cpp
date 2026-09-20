@@ -84,11 +84,13 @@ void calcColor(unsigned char *toFill, Autonoma *c, Ray ray,
   // free(times);
   double bestTime = inf;
   Shape *bestShape = NULL;
-  for (ShapeNode *t = c->listStart; t != NULL; t = t->next) {
-    double time = t->data->getIntersection(ray);
-    if (time < bestTime) {
-      bestTime = time;
-      bestShape = t->data;
+  if (c->gate == NULL || c->gate->getIntersection(ray) != inf) {
+    for (ShapeNode *t = c->listStart; t != NULL; t = t->next) {
+      double time = t->data->getIntersection(ray);
+      if (time < bestTime) {
+        bestTime = time;
+        bestShape = t->data;
+      }
     }
   }
   if (bestShape == NULL || bestTime == inf) {

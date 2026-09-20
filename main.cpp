@@ -353,6 +353,33 @@ Autonoma *createInputs(const char *inputFile) {
         unsigned int *polys = getTriangles(triangles, num_polygons);
         fclose(triangles);
         Vector offset(off_x, off_y, off_z);
+
+        // Get min/max
+        Vector mn(points[0] + offset), mx(points[0] + offset);
+        for (int i = 1; i < num_points; i++) {
+          Vector p = points[i] + offset;
+          if (p.x < mn.x)
+            mn.x = p.x;
+          if (p.x > mx.x)
+            mx.x = p.x;
+          if (p.y < mn.y)
+            mn.y = p.y;
+          if (p.y > mx.y)
+            mx.y = p.y;
+          if (p.z < mn.z)
+            mn.z = p.z;
+          if (p.z > mx.z)
+            mx.z = p.z;
+        }
+        Vector center((mn.x + mx.x) / 2, (mn.y + mx.y) / 2, (mn.z + mx.z) / 2);
+        double radius = 0;
+        for (int i = 0; i < num_points; i++) {
+          double r = (points[i] + offset - center).mag();
+          if (r > radius)
+            radius = r;
+        }
+        MAIN_DATA->gate = new Sphere(center, texture, 0, 0, 0, radius);
+
         for (int i = 0; i < num_polygons; i++) {
           Triangle *shape = new Triangle(
               points[polys[3 * i]] + offset, points[polys[3 * i + 1]] + offset,
