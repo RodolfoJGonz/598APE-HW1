@@ -126,9 +126,10 @@ void calcColor(unsigned char *toFill, Autonoma *c, Ray ray,
     if (opacity < 1 - 1e-6) {
       Ray nextRay = Ray(intersect + ray.vector * 1E-4, ray.vector);
       calcColor(col, c, nextRay, depth + 1);
-      toFill[0] = (unsigned char)(toFill[0] * opacity + col[0] * (1 - opacity));
-      toFill[1] = (unsigned char)(toFill[1] * opacity + col[1] * (1 - opacity));
-      toFill[2] = (unsigned char)(toFill[2] * opacity + col[2] * (1 - opacity));
+      double opDiff = 1-opacity;
+      toFill[0] = (unsigned char)(toFill[0] * opacity + col[0] * opDiff);
+      toFill[1] = (unsigned char)(toFill[1] * opacity + col[1] * opDiff);
+      toFill[2] = (unsigned char)(toFill[2] * opacity + col[2] * opDiff);
     }
     if (reflection > 1e-6) {
       Vector norm = curShape->getNormal(intersect).normalize();
@@ -136,12 +137,13 @@ void calcColor(unsigned char *toFill, Autonoma *c, Ray ray,
       Ray nextRay = Ray(intersect + vec * 1E-4, vec);
       calcColor(col, c, nextRay, depth + 1);
 
+      double reflcDiff = 1-reflection;
       toFill[0] =
-          (unsigned char)(toFill[0] * (1 - reflection) + col[0] * (reflection));
+          (unsigned char)(toFill[0] * reflcDiff + col[0] * (reflection));
       toFill[1] =
-          (unsigned char)(toFill[1] * (1 - reflection) + col[1] * (reflection));
+          (unsigned char)(toFill[1] * reflcDiff + col[1] * (reflection));
       toFill[2] =
-          (unsigned char)(toFill[2] * (1 - reflection) + col[2] * (reflection));
+          (unsigned char)(toFill[2] * reflcDiff + col[2] * (reflection));
     }
   }
 }
