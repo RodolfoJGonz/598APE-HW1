@@ -1,141 +1,157 @@
-# 598APE-HW1
+# 598APE-HW1 — Ray Tracer
 
-This repository contains code for homework 1 of 598APE.
+Implementation of the CS598APE HW1 ray tracer, plus a series of
+profiling-driven optimizations. The renderer produces still images
+(PPM/PNG) and animated movies (MP4, encoded losslessly).
 
-In particular, this repository is an implementation of a Raytracer.
+- `main.cpp`, `src/` — the renderer; `inputs/` — scenes (pianoroom static,
+  globe animated, elephant = 111,748-triangle mesh with orbiting camera);
+  `data/` — mesh files; `images/` — textures; `docker/` + `dockerrun.sh` —
+  build environment; `notes.txt` — development log (timings, future work).
 
-To compile the program run:
+## 1. Tools
+
+No other dependencies (no libraries, no submodules). The code uses GNU
+statement expressions, so g++ is required (clang will not compile it).
+Everything above is installed in the Docker image
+(`docker/Dockerfile`, Ubuntu 24.04):
+
 ```bash
-make -j
+docker build -t <user>/598ape docker/
+./dockerrun.sh        # mounts this repo at /host and opens a shell
+cd /host && make
 ```
 
-To clean existing build artifacts run:
+Build flags: `-O3 -g -Werror -fopenmp -fno-omit-frame-pointer -flto`
+(the `-fno-omit-frame-pointer` is required for `perf --call-graph fp`).
+
+## 2. Build and run
+
 ```bash
-make clean
+make clean && make    # compiles src/*.cpp, links ./main.exe
 ```
 
-This program assumes the following are installed on your machine:
-* A working C++ compiler (g++ is assumed in the Makefile)
-* make
-* ImageMagick (for importing and exporting non-ppm images)
-* FFMpeg (for exporting movies from image sequences)
-
-The raytracer program here is general and can be used to generate any number of different potential scenes.
-
-Once compiled, one can call the raytracer program as follows:
-```bash
-./main.exe --help
-# Prints the following
-# Usage ./main.exe [-H <height>] [-W <width>] [-F <framecount>] [--movie] [--no-movie] [--png] [--ppm] [--help] [-o <outfile>] [-i <infile>] [-a <animationfile>]
+```
+./main.exe [-H <h>] [-W <w>] [-F <frames>] [--movie] [--png] [--ppm]
+           [-o <out>] [-i <scene.ray>] [-a <animation>] [--help]
 ```
 
-The raytracer program takes a scene file (a text file ending in .ray) and generates an image or sequence of images corresponding to the specified scene.
+- **Use `--ppm` for benchmarks** (PNG goes through ImageMagick per
+  frame and is lossy).
+- Multi-frame runs write `<out>.tmp.%07d.ppm` per frame, then encode with
+  ffmpeg **losslessly** (`ffv1` → `libx264 -preset veryslow -qp 0`). The
+  encode is slow by design — it exists so the movie contains exactly the
+  rendered pixels.
+- **Timing:** the program prints `Total time to create images=X seconds`
+  — that is render-only time and the number to compare between builds;
+  movie wall-clock additionally includes the lossless encode.
 
-One can tune the height, width, and format of the image being generated with optional command line arguments. For example, let's generate an 500x500 image corresponding to the scene in `inputs/pianoroom.ray`, in PPM format.
+### Benchmarks
 
 ```bash
+# B1 — static scene, single frame
 ./main.exe -i inputs/pianoroom.ray --ppm -o output/pianoroom.ppm -H 500 -W 500
+
+# B2 — elephant mesh, 24 frames @ 100×100
+./main.exe -i inputs/elephant.ray --ppm -a inputs/elephant.animate \
+           --movie -F 24 -W 100 -H 100 -o output/sphere.mp4
+
+# B3 — same scene @ 300×300
+./main.exe -i inputs/elephant.ray --ppm -a inputs/elephant.animate \
+           --movie -F 24 -W 300 -H 300 -o output/sphere.mp4
 ```
 
-As we run the program, we see the following output:
+Reference times (16-core machine, "Total time" line): B1 ≈ 0.04 s;
+B2 ≈ 3.06 s; B3 ≈ 20.9 s. Times scale with core count and machine speed;
+**ratios between builds are the reproducible quantity.**
+
+### Changing the mesh (elephant scene)
+
+The elephant is a `mesh` shape in `inputs/elephant.ray`, specified by:
+
 ```
-Done Frame       0|
-Total time to create images=1.334815 seconds
+mesh
+<vertex file> <num verts> <face file> <num faces> <off_x> <off_y> <off_z>
+<texture block>
+<normal-map block>
 ```
 
-We have placed timer code surrounding the main computational loop inside main.cpp. It is your goal to reduce this runtime as much as possible, while maintaining or increasing the complexity (i.e. resolution, number of frames) of the scene.
+The vertex file has one `x y z` per line; the face file has one `i j k`
+per line (three 0-based vertex indices). The offsets translate every
+vertex (centering the model under the camera and light).
 
-Here we see that the image took 1.3 seconds to run and produced a result in `output/pianoroom.ppm`. Input and output of images is already handled by the library. In particular, the PPM format (see https://en.wikipedia.org/wiki/Netpbm for an example), represents images as text for data -- which makes it easy to input and output without the use of a library. However, as this is not the most efficient, this application uses the tool ImageMagick tool to convert to and from the PPM formats.
+Two meshes ship in `data/`: the demo sphere (`x.txt`/`f.txt`, 3,168
+triangles — fast) and the full elephant (`elepx.txt`/`elepf.txt`, 111,748
+triangles). To switch between them, comment one `mesh` line out and
+uncomment the other in `inputs/elephant.ray`:
 
-## Input Programs
-This project contains three (arguably four) input programs for you to optimize.
+```
+# data/x.txt 1586 data/f.txt 3168 -1.58 -.43 2.7
+data/elepx.txt 62779 data/elepf.txt 111748 -1.58 -.43 2.7
+```
 
-### PianoRoom
+(This is exactly the scene change commit `44f7013` made; the current
+`inputs/elephant.ray` uses the full mesh.) For your own model, export
+vertices + triangle indices to those two formats and keep it near the
+origin, ~1–2 units across — the camera orbits at radius 2. The bounding-
+sphere gate (section 3) is rebuilt automatically from whatever mesh loads.
 
-A simple room with a reflecting checkerboard floor, a stairwell, a sphere, a circular rug, and a mirror ref.
+### Running the baseline
 
-Here we want to produce the highest resolution single image of this format, as fast as possible. The relevant command for producing an output is:
+The baseline is commit **`19bbc81`** — the last commit before optimization
+work began (original upstream code is `d98f5dc`). The baseline
+`src/Makefile` compiled `src/` at **-O0** and the render loop was
+**serial** (no OpenMP) — check it out as-is, and do not port the
+optimized Makefile flags back in.
 
 ```bash
+git checkout 19bbc81 && make clean && make
 ./main.exe -i inputs/pianoroom.ray --ppm -o output/pianoroom.ppm -H 500 -W 500
+# reference: Total time to create images=1.070294 seconds
 ```
 
-### Globe
+## 3. The optimizations, and how to evaluate each
 
-A video of the Earth floating on top of a sea with a sky in the background. The Earth and clouds are rotating (in opposite directions), and the sea beneath reflects the scene above, and moves.
+Timings are render-only ("Total time to create images") on the reference
+16-core machine.
 
-Here we want to produce the highest resolution video, as fast as possible. The relevant command for producing an output is:
+| Commit | Change | How to evaluate | Effect |
+|---|---|---|---|
+| `dfa831d` | -O0→-O3 for `src/`; `-flto`, `-fopenmp`, `-fno-omit-frame-pointer`; collect+sort→min-search in `calcColor`; `#pragma omp parallel for schedule(dynamic,16)` over pixels in `refresh` | B1: `19bbc81` vs `dfa831d` | 1.070 → 0.040 s (~27×) |
+| `eb38003` + `44cf0a2` | `solveScalers` algebra rearrangement (fewer flops in the Cramer's rule used by every plane/triangle test and shadow test); `44cf0a2` fixes a slip introduced by `eb38003` | effect is profile-visible (`solveScalers` self-time) | small |
+| `44f7013` | **Bounding-sphere gate** for meshes; same commit swaps `elephant.ray` to the full mesh | recipe below | 43 s → 3.06 s (render), 14× on B2 |
+| `16f1046` | **Möller–Trumbore** in `Triangle::getIntersection` | B3: 35 s → 20.9 s; profile `solveScalers` 11.3% → 2.1% | ~1.7× on B3 |
+| `c58cfd1` (HEAD) | `calcColor`: hoist `1 - opacity` / `1 - reflection` out of the per-channel blends | small timing delta | small |
 
-```bash
-./main.exe -i inputs/globe.ray --ppm  -a inputs/globe.animate --movie -F 24 
-```
+Notes per commit:
 
-Here, as we are generating multiple frames, the extra command `-a <animationfile>` is used to pass in a sequence of commands to generate subsequent frames.
+- **`dfa831d`** bundles four independent changes; the intermediate 500×500
+  timings (sort→min 0.745 s, +OpenMP 0.096 s, +dynamic schedule 0.072 s,
+  +O3 0.040 s) are in `notes.txt`. The OpenMP loop is safe because each
+  pixel is an independent pure function of the scene writing only to its
+  own 3-byte slot; the schedule is dynamic because pixel costs vary ~50×
+  (background pixel vs mesh-hit pixel).
+- **`44f7013`** — when a mesh loads, `main.cpp` computes a bounding sphere
+  (bbox center, radius = max vertex distance) and stores it as
+  `Autonoma::gate`; `calcColor` skips the entire triangle scan for rays
+  that miss it (~97% of rays in the elephant scene, since the elephant
+  occupies ~3% of the frame). Valid while the mesh encloses all hittable
+  geometry (true for `elephant.ray`). To evaluate the code change without
+  the scene swap:
 
-The number of frames we wish to generate (24) is passed in as `-F <numframes>`.
-
-Here we will produce 24 individual images for each frame. To produce a playable movie out of these images, the `--movie` command will call a program called FFMpeg to produce a playable video.
-
-### Elephant
-
-A mesh of objects. In practical graphics applications, designing a primitive for each possible object is too complex. Instead, one builds up a mesh of triangles to represent the object being shown. Given sufficiently many triangles, we can represent arbitrarily complex structures. Here, we wish to make a video circling around a Mesh object which we import.
-
-The simple version of this program is generated by the following command:
-```bash
-./main.exe -i inputs/elephant.ray --ppm  -a inputs/elephant.animate --movie -F 24 -W 100 -H 100 -o output/sphere.mp4 
-```
-
-Note the reduced resolution (as the initial unoptimized code can be somewhat slow).
-
-This initial mesh represents a sphere with 3168 triangles.
-
-Here we produce a video in which we have the camera circles around the object.
-
-If we inspect the input file `inputs/elephant.ray` we see that it loads the mesh from two files, as defined by the line
-```
-data/x.txt 1586 data/f.txt 3168 -1.58 -.43 2.7
-```
-
-The goal here is to speed up the program sufficiently to make a high resolution circle of the elephant mesh (found in `data/elepx.txt` and `data/elepf.txt`), which contains 111748 triangles. One can edit the `.ray` file and comment out the sphere mesh and replace it with `data/elepx.txt 62779 data/elepf.txt 111748 -1.58 -.43 2.7` (this is done in `inputs/realelephant.ray`).
-
-## Code Overview
-
-The raytracer contains several core utilities, defined in different files.
-
-### Camera
-
-The Camera class contains information about the position and direction we are facing. An image is constructed by creating a grid of points and sending out rays from each of these points, and determining what objects they collide with. Each result becomes an individual pixel in our resulting image.
-
-### Shape
-
-Each object in our scene is defined as a shape. There are several shapes subclasses in the application. This includes a plane (an infinitely long flat surface), a sphere (a collection of points equidistant from a center), a disk (a flat surface whose points are within a given distance of a center), a box (a flat rectangle), and a triangle.
-
-Shapes have a position in space, and potentially an orientation (i.e. direction they face, as defined with the angles yaw pitch and roll).
-
-Shapes also have a texture defining what color of each point of the shape, and optionally a "normalMap" texture which defines how light bounces off each point.
-
-Core methods within shape include:
-* `getIntersection`, which defines whether a given light ray will hit the shape, and if so returns time it takes the light to hit it (otherwise infinity).
-* `getLightIntersection`: Given that a ray hits the shape, determine how a light source will illuminate the shape at that point based off of the color of the object, and its spectral properties (i.e. opaque, reflective, aminent lighting).
-* `getNormal` determine the normal axis to the point of collision, in order to compute the direction in which light will bounce off the object.
-
-### Texture
-
-A texture object defines what color will be applied at a point in space. There are two textures implemented: a single color for all points, and one loaded from an image. Textures are used to define both the color of an object, and also can optionally be used to define normal axes for an object (using data stored in rgb to define the xyz axis).
-
-### Light
-
-Light objects illuminate a scene, resulting in differences in gradients of colors on an object and shadows. Lights have a color and a position.
-
-### Autonoma
-
-An Autonoma is a base class used to hold all of the shapes in scope, the camera, and all lights.
-
-
-## Docker
-
-For ease of use and installation, we provide a docker image capable of running and building code here. The source docker file is in /docker (which is essentially a list of commands to build an OS state from scratch). It contains the dependent compilers, and some other nice things.
-
-You can build this yourself manually by running `cd docker && docker build -t <myusername>/598ape`. Alternatively we have pushed a pre-built version to `wsmoses/598ape` on Dockerhub.
-
-You can then use the Docker container to build and run your code. If you run `./dockerrun.sh` you will enter an interactive bash session with all the packages from docker installed (that script by default uses `wsmoses/598ape`, feel free to replace it with whatever location you like if you built from scratch). The current directory (aka this folder) is mounted within `/host`. Any files you create on your personal machine will be available there, and anything you make in the container in that folder will be available on your personal machine.
+  ```bash
+  git checkout 44f7013
+  git checkout 44f7013^ -- main.cpp src/light.cpp src/light.h src/shape.cpp
+  make clean && make
+  ./main.exe -i inputs/elephant.ray --ppm -a inputs/elephant.animate \
+             --movie -F 24 -W 100 -H 100 -o output/base_g.mp4   # ≈ 43 s wall
+  git checkout 44f7013 -- main.cpp src/light.cpp src/light.h src/shape.cpp
+  make clean && make
+  ./main.exe -i inputs/elephant.ray --ppm -a inputs/elephant.animate \
+             --movie -F 24 -W 100 -H 100 -o output/opt_g.mp4    # ≈ 3 s render
+  ```
+- **`16f1046`** — replaces the plane test + Cramer's rule + three half-plane
+  sign tests with the standard Möller–Trumbore test: one division instead of
+  three, early rejection as soon as a barycentric coordinate is out of
+  range, no `solveScalers`. Double-sided (mesh winding unknown) and keeps
+  the original `t > 0` visibility contract, hence bit-identical output.
